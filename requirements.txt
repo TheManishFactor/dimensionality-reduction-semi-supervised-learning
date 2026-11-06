@@ -1,0 +1,21 @@
+# Core scientific stack
+numpy>=1.26,<3.0
+pandas>=2.2,<4.0
+scipy>=1.13,<2.0
+# scikit-learn >= 1.6 is required for FrozenEstimator, used by the Phase 6
+# sigmoid-calibrated LinearSVC.
+scikit-learn>=1.6,<2.0
+
+# Visualization
+matplotlib>=3.9,<4.0
+seaborn>=0.13,<0.14
+
+# Dashboard
+streamlit>=1.40,<2.0
+
+# Configuration and persistence
+PyYAML>=6.0,<7.0
+joblib>=1.4,<2.0
+
+# Testing
+pytest>=8.0,<9.0

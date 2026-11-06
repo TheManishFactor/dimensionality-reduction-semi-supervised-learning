@@ -1,0 +1,195 @@
+# =============================================================================
+# Research configuration
+# Project: Impact of Dimensionality Reduction on the Performance of Subsequent
+#          Supervised Classifiers in a Semi-Supervised Setting
+#
+# Phase 4 implements baseline, PCA, and LDA dimensionality reduction. Phase 5
+# trains and evaluates the supervised baseline classifiers. Phase 6 adds
+# confidence-based self-training for the same 81 conditions. The dashboard
+# belongs to a later phase.
+# =============================================================================
+
+project:
+  name: "dr-semi-supervised-classification"
+  description: >-
+    Evaluate how dimensionality reduction affects supervised classifiers when
+    trained with limited labelled data and self-training pseudo-labelling.
+  random_seed: 42
+  verbose: true
+
+# -----------------------------------------------------------------------------
+# Data
+# -----------------------------------------------------------------------------
+data:
+  # Fraction of the full dataset held out for final testing.
+  test_size: 0.20
+  # Fraction of the remaining (non-test) data treated as labelled. The rest
+  # forms the unlabelled pool used by self-training.
+  labelled_proportions:
+    - 0.10
+    - 0.25
+    - 0.50
+  # Use stratified sampling when splitting so class balance is preserved.
+  stratify: true
+
+  paths:
+    raw_dir: "data/raw"
+    processed_dir: "data/processed"
+
+  datasets:
+    breast_cancer:
+      display_name: "Breast Cancer Wisconsin (Diagnostic)"
+      source: "Kaggle: uciml/breast-cancer-wisconsin-data"
+      enabled: true
+    mnist:
+      display_name: "MNIST Digit Recognizer"
+      source: "Kaggle Digit Recognizer competition files in data/raw/mnist/"
+      enabled: true
+    har:
+      display_name: "Human Activity Recognition Using Smartphones"
+      source: "UCI HAR dataset (Kaggle UCI copy) in data/raw/har/"
+      enabled: true
+
+  # Feature scaling. Statistics are estimated on the training partition only;
+  # in the semi-supervised setting that partition is the full training pool
+  # (labelled + unlabelled). Test rows never influence the scaler.
+  scaling:
+    method: "standard"              # StandardScaler
+    fit_scope: "training_partition"
+
+  # Per-dataset split strategy, enforced by src/preprocessing.py.
+  splitting:
+    breast_cancer:
+      strategy: "stratified_holdout"
+      test_size: 0.20
+      stratify: true
+    mnist:
+      strategy: "stratified_holdout"
+      test_size: 0.20
+      stratify: true
+      # Only train.csv (42,000 labelled rows) is used. The competition's
+      # unlabelled test.csv is ignored so the held-out split stays clean.
+      ignore_competition_test: true
+    har:
+      strategy: "official_train_test"
+      test_size: null
+      stratify: false
+      # The official UCI split is already subject-disjoint; never mix subjects.
+      preserve_subject_separation: true
+
+# -----------------------------------------------------------------------------
+# Dimensionality reduction
+# -----------------------------------------------------------------------------
+dimensionality_reduction:
+  # "none" keeps the original feature space (baseline).
+  methods:
+    - none
+    - pca
+    - lda
+
+  baseline:
+    enabled: true
+
+  pca:
+    enabled: true
+    # Fraction of variance to retain. Takes precedence over n_components when
+    # both are set. Fractional targets require svd_solver "full" or "auto".
+    explained_variance: 0.95
+    # Legacy alias kept for compatibility; equals explained_variance above.
+    n_components: 0.95
+    whiten: false
+    svd_solver: "auto"
+    random_state: 42
+
+  lda:
+    enabled: true
+    # Automatic selection uses min(n_features, n_classes - 1). The labelled
+    # proportion determines how many rows are available for each fit.
+    automatic_components: true
+    n_components: null
+    solver: "svd"
+
+# -----------------------------------------------------------------------------
+# Classifiers
+# -----------------------------------------------------------------------------
+classifiers:
+  logistic_regression:
+    C: 1.0
+    solver: "lbfgs"
+    max_iter: 2000
+    class_weight: null
+    random_state: 42
+
+  # Phase 5 deliberately uses a LINEAR SVM (sklearn LinearSVC). It scales to
+  # MNIST and provides hard labels only; Phase 6 self-training will need a
+  # probability-capable alternative.
+  svm:
+    C: 1.0
+    loss: "squared_hinge"
+    dual: true
+    tol: 0.001
+    max_iter: 2000
+    class_weight: null
+    random_state: 42
+
+  knn:
+    n_neighbors: 5
+    weights: "distance"
+    metric: "minkowski"
+    p: 2
+    algorithm: "brute"
+    # Brute force is the right neighbour search in 300-784 dimensions. Six
+    # workers keep distance chunks inside the available RAM instead of one
+    # chunk per logical core.
+    n_jobs: 6
+
+# -----------------------------------------------------------------------------
+# Semi-supervised learning (self-training)
+# -----------------------------------------------------------------------------
+self_training:
+  # Pseudo-label an unlabelled sample only if max predicted probability meets
+  # or exceeds this threshold. The threshold is fixed across all 81 Phase 6
+  # experiments and is never tuned on test performance.
+  confidence_threshold: 0.90
+  # Maximum number of self-training rounds (accept + retrain). Three rounds
+  # keep the 81-condition grid fast enough to rerun; the threshold remains
+  # 0.90 and the stopping rules are unchanged.
+  max_iterations: 3
+  # Stop when a round accepts fewer than this many new pseudo-labelled samples.
+  minimum_new_pseudo_labels: 1
+  random_state: 42
+
+  # LinearSVC exposes no probabilities. Phase 6 keeps the Phase 5 LinearSVC
+  # configuration and wraps it with Platt (sigmoid) calibration fitted only on
+  # a class-stratified subset of the ORIGINAL labelled rows. Pseudo-labelled
+  # rows are never used for calibration.
+  svm_calibration:
+    method: "sigmoid"
+    calibration_fraction: 0.20
+    min_per_class: 2
+    max_splits: 5
+
+# -----------------------------------------------------------------------------
+# Evaluation
+# -----------------------------------------------------------------------------
+evaluation:
+  # Phase 5 reports these test-set metrics for every experiment.
+  metrics:
+    - accuracy
+    - macro_f1
+  # Save a normalized confusion matrix per experiment (figures directory).
+  save_confusion_matrix: false
+  # Optional repeats/seeds for variance estimates.
+  n_repeats: 1
+
+# -----------------------------------------------------------------------------
+# Output locations
+# -----------------------------------------------------------------------------
+results:
+  metrics_dir: "results/metrics"
+  figures_dir: "results/figures"
+  reports_dir: "results/reports"
+  classifier_evaluation_dir: "results/classifier_evaluation"
+  self_training_dir: "results/self_training"
+  save_predictions: true
+  metrics_filename: "experiment_metrics.csv"
